@@ -15,9 +15,17 @@ from typing import List, Dict, Optional
 from dotenv import load_dotenv
 from tqdm import tqdm
 import random
+import sys
+
+# Add parent directory to path for utils
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils.logging_config import setup_logging, get_logger
 
 # Load environment variables
 load_dotenv()
+
+# Set up logging
+logger = setup_logging(log_level="INFO")
 
 # NBA Stats API endpoints
 NBA_API_BASE = "https://stats.nba.com/stats"
@@ -171,22 +179,24 @@ def main():
     with open(games_file, "r") as f:
         games = json.load(f)
     
-    print(f"Found {len(games)} games to process")
+    logger.info(f"Found {len(games)} games to process")
     
-    # Extract game IDs
+    # Extract game IDs and deduplicate (each game appears twice - once per team)
     game_ids = []
+    seen_ids = set()
     for game in games:
-        game_id = game.get("GAME_ID") or game.get("game_id") or game.get("GAME_ID")
-        if game_id:
+        game_id = game.get("GAME_ID") or game.get("game_id")
+        if game_id and game_id not in seen_ids:
             game_ids.append(str(game_id))
+            seen_ids.add(game_id)
     
     if not game_ids:
         # Try alternative field names
-        print("⚠ No game IDs found with standard field names. Trying alternatives...")
+        logger.warning("No game IDs found with standard field names. Trying alternatives...")
         if games:
-            print(f"Sample game keys: {list(games[0].keys())}")
+            logger.debug(f"Sample game keys: {list(games[0].keys())}")
     
-    print(f"Processing {len(game_ids)} games")
+    logger.info(f"Processing {len(game_ids)} unique games")
     
     # Create output directory
     output_dir = Path(__file__).parent.parent / "data" / "raw" / "playbyplay"
@@ -198,11 +208,11 @@ def main():
     games_skipped = len(game_ids) - len(games_to_fetch)
     
     if games_skipped > 0:
-        print(f"✓ Skipping {games_skipped} games that are already fetched")
-    print(f"Fetching {len(games_to_fetch)} remaining games...\n")
+        logger.info(f"Skipping {games_skipped} games that are already fetched")
+    logger.info(f"Fetching {len(games_to_fetch)} remaining games...")
     
     if not games_to_fetch:
-        print("All games have already been fetched!")
+        logger.info("All games have already been fetched!")
         return
     
     # Fetch play-by-play data
@@ -215,18 +225,15 @@ def main():
     
     # Test with first game to see if API is working
     if games_to_fetch:
-        print(f"Testing API with first game: {games_to_fetch[0]}")
+        logger.info(f"Testing API with first game: {games_to_fetch[0]}")
         test_result = fetch_playbyplay(games_to_fetch[0], max_retries=1, session=session)
         if test_result:
-            print(f"✓ API is working! Fetched {len(test_result.get('events', []))} events")
+            logger.info(f"API is working! Fetched {len(test_result.get('events', []))} events")
         else:
-            print("⚠ API test failed. The NBA Stats API may be blocking requests.")
-            print("  This is common - the API sometimes blocks automated requests.")
-            print("  You may need to:")
-            print("  1. Wait and try again later")
-            print("  2. Use a VPN or different network")
-            print("  3. Check if the API endpoint has changed")
-            print("\nContinuing anyway...\n")
+            logger.warning("API test failed. The NBA Stats API may be blocking requests.")
+            logger.warning("This is common - the API sometimes blocks automated requests.")
+            logger.warning("You may need to: 1) Wait and try again later, 2) Use a VPN, 3) Check if endpoint changed")
+            logger.info("Continuing anyway...")
         time.sleep(1)
     
     for game_id in tqdm(games_to_fetch, desc="Fetching play-by-play"):
@@ -250,10 +257,14 @@ def main():
     
     session.close()
     
-    print(f"\n✓ Completed fetching play-by-play data")
-    print(f"  Successful: {successful}")
-    print(f"  Failed: {failed}")
-    print(f"  Output directory: {output_dir}")
+    logger.info("=" * 60)
+    logger.info("Completed fetching play-by-play data")
+    logger.info(f"  Successful: {successful}")
+    logger.info(f"  Failed: {failed}")
+    logger.info(f"  Output directory: {output_dir}")
+    
+    if failed > 0:
+        logger.warning(f"{failed} games failed to fetch. Check logs for details.")
 
 
 if __name__ == "__main__":

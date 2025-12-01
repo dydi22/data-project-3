@@ -53,3 +53,7 @@ Thumbs.db
 # Prefect
 .prefect/
 
+# Logs
+logs/
+*.log
+

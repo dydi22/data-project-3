@@ -6,12 +6,24 @@ This script computes:
 - Foul frequencies by quarter
 - Time-based pace metrics
 - Momentum measures (rolling point differences)
+- Comeback probabilities
+- Clutch performance
+- Timeout effectiveness
+- Overtime predictors
 """
 
 import duckdb
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import sys
+
+# Add parent directory to path for utils
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils.logging_config import setup_logging, get_logger
+
+# Set up logging
+logger = setup_logging(log_level="INFO")
 
 
 def compute_scoring_runs(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
@@ -20,7 +32,7 @@ def compute_scoring_runs(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     
     Returns DataFrame with run lengths and team information.
     """
-    print("Computing scoring runs...")
+    logger.info("Computing scoring runs...")
     
     # First check what columns are available
     available_cols = conn.execute("DESCRIBE playbyplay").fetchdf()["column_name"].tolist()
@@ -104,7 +116,7 @@ def compute_scoring_runs(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
                 last_team = None
     
     runs_df = pd.DataFrame(runs)
-    print(f"✓ Computed {len(runs_df)} scoring runs")
+    logger.info(f"Computed {len(runs_df)} scoring runs")
     return runs_df
 
 
@@ -114,7 +126,7 @@ def compute_droughts(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     
     Returns DataFrame with drought lengths by team.
     """
-    print("Computing scoring droughts...")
+    logger.info("Computing scoring droughts...")
     
     # Check available columns
     available_cols = conn.execute("DESCRIBE playbyplay").fetchdf()["column_name"].tolist()
@@ -191,7 +203,7 @@ def compute_droughts(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
                     current_drought = 0
     
     droughts_df = pd.DataFrame(droughts)
-    print(f"✓ Computed {len(droughts_df)} scoring droughts")
+    logger.info(f"Computed {len(droughts_df)} scoring droughts")
     return droughts_df
 
 
@@ -201,7 +213,7 @@ def compute_foul_frequencies(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     
     Returns DataFrame with foul counts by period and game minute.
     """
-    print("Computing foul frequencies...")
+    logger.info("Computing foul frequencies...")
     
     # Check available columns
     available_cols = conn.execute("DESCRIBE playbyplay").fetchdf()["column_name"].tolist()
@@ -231,7 +243,7 @@ def compute_foul_frequencies(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     # Group by period and minute
     foul_freq = df.groupby(["period", "game_minute"]).size().reset_index(name="foul_count")
     
-    print(f"✓ Computed foul frequencies for {len(foul_freq)} period-minute combinations")
+    logger.info(f"Computed foul frequencies for {len(foul_freq)} period-minute combinations")
     return foul_freq
 
 
@@ -241,7 +253,7 @@ def compute_pace_metrics(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     
     Returns DataFrame with pace metrics.
     """
-    print("Computing pace metrics...")
+    logger.info("Computing pace metrics...")
     
     query = """
         SELECT 
@@ -295,7 +307,7 @@ def compute_pace_metrics(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
                 })
     
     pace_df = pd.DataFrame(pace_metrics)
-    print(f"✓ Computed pace metrics for {len(pace_df)} game-periods")
+    logger.info(f"Computed pace metrics for {len(pace_df)} game-periods")
     return pace_df
 
 
@@ -305,7 +317,7 @@ def compute_momentum(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     
     Returns DataFrame with momentum metrics.
     """
-    print("Computing momentum measures...")
+    logger.info("Computing momentum measures...")
     
     query = """
         SELECT 
@@ -345,7 +357,7 @@ def compute_momentum(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
                                       "score_margin", "margin_change", "momentum_5pos"]])
     
     momentum_df = pd.concat(momentum_data, ignore_index=True)
-    print(f"✓ Computed momentum for {len(momentum_df)} events")
+    logger.info(f"Computed momentum for {len(momentum_df)} events")
     return momentum_df
 
 
@@ -355,7 +367,7 @@ def compute_comeback_probability(conn: duckdb.DuckDBPyConnection) -> pd.DataFram
     
     Returns DataFrame with comeback probabilities.
     """
-    print("Computing comeback probabilities...")
+    logger.info("Computing comeback probabilities...")
     
     # Get final scores and game outcomes
     query = """
@@ -371,10 +383,10 @@ def compute_comeback_probability(conn: duckdb.DuckDBPyConnection) -> pd.DataFram
     
     final_scores = conn.execute(query).fetchdf()
     
-    # Determine winner (1 = home won, 0 = visitor won)
+    # Determine winner
     final_scores["home_won"] = (final_scores["final_home_score"] > final_scores["final_visitor_score"]).astype(int)
     
-    # Get score margins at different time points
+    # Get score margins at different time points for ALL games
     comeback_data = []
     
     for game_id in final_scores["game_id"].unique():
@@ -397,48 +409,68 @@ def compute_comeback_probability(conn: duckdb.DuckDBPyConnection) -> pd.DataFram
         
         game_data = conn.execute(time_query).fetchdf()
         
+        if len(game_data) == 0:
+            continue
+        
         # Sample at 5-minute intervals
         for minutes_remaining in [5, 10, 15, 20, 25, 30, 35, 40]:
             target_time = (48 - minutes_remaining) * 60
-            closest = game_data.iloc[(game_data["game_time_seconds"] - target_time).abs().argsort()[:1]]
+            closest_idx = (game_data["game_time_seconds"] - target_time).abs().idxmin()
+            closest = game_data.loc[[closest_idx]]
             
             if len(closest) > 0:
                 margin = closest.iloc[0]["score_margin"]
-                # Margin is home - visitor, so negative = home losing
-                # If home won and was losing (negative margin), that's a comeback
-                # If visitor won and home was winning (positive margin), that's a comeback for visitor
-                if home_won:
-                    # Home team perspective: were they losing?
-                    was_losing = margin < 0
-                    deficit = abs(margin) if was_losing else 0
-                    came_back = 1 if was_losing else 0
-                else:
-                    # Visitor team perspective: was home winning?
-                    was_losing = margin > 0
-                    deficit = abs(margin) if was_losing else 0
-                    came_back = 1 if was_losing else 0
                 
-                comeback_data.append({
-                    "game_id": game_id,
-                    "minutes_remaining": minutes_remaining,
-                    "deficit": deficit,
-                    "home_won": home_won,
-                    "came_back": came_back
-                })
+                # For each time point, record:
+                # - If home team was trailing, did they win?
+                # - If visitor team was trailing, did they win?
+                
+                # Home team perspective
+                if margin < 0:  # Home is losing
+                    deficit = abs(margin)
+                    trailing_team_won = 1 if home_won else 0
+                    comeback_data.append({
+                        "game_id": game_id,
+                        "minutes_remaining": minutes_remaining,
+                        "deficit": deficit,
+                        "trailing_team": "home",
+                        "trailing_team_won": trailing_team_won
+                    })
+                
+                # Visitor team perspective
+                if margin > 0:  # Visitor is losing
+                    deficit = margin
+                    trailing_team_won = 1 if not home_won else 0
+                    comeback_data.append({
+                        "game_id": game_id,
+                        "minutes_remaining": minutes_remaining,
+                        "deficit": deficit,
+                        "trailing_team": "visitor",
+                        "trailing_team_won": trailing_team_won
+                    })
     
     comeback_df = pd.DataFrame(comeback_data)
     
-    # Calculate probabilities
+    # Calculate win probabilities for trailing teams
     if not comeback_df.empty:
-        prob_df = comeback_df.groupby(["minutes_remaining", "deficit"])["came_back"].agg([
+        # Round deficits to 2-point buckets to increase sample sizes (e.g., 8-9 points -> 8 points)
+        comeback_df["deficit_bucket"] = (comeback_df["deficit"] // 2) * 2
+        
+        prob_df = comeback_df.groupby(["minutes_remaining", "deficit_bucket"])["trailing_team_won"].agg([
             "mean", "count"
         ]).reset_index()
         prob_df.columns = ["minutes_remaining", "deficit", "win_probability", "sample_size"]
-        prob_df = prob_df[prob_df["sample_size"] >= 5]  # Only include where we have enough data
+        # Only include combinations with at least 5 samples for reliability (reduced from 10)
+        prob_df = prob_df[prob_df["sample_size"] >= 5]
+        prob_df = prob_df[prob_df["sample_size"] >= 10]
     else:
         prob_df = pd.DataFrame()
     
-    print(f"✓ Computed comeback probabilities for {len(prob_df)} time-deficit combinations")
+        logger.info(f"Computed comeback probabilities for {len(prob_df)} time-deficit combinations")
+        if not prob_df.empty:
+            logger.debug(f"  Sample sizes range from {prob_df['sample_size'].min()} to {prob_df['sample_size'].max()}")
+            logger.debug(f"  Win probabilities range from {prob_df['win_probability'].min():.2%} to {prob_df['win_probability'].max():.2%}")
+    
     return prob_df
 
 
@@ -448,7 +480,7 @@ def compute_clutch_performance(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
     
     Returns DataFrame with clutch performance metrics.
     """
-    print("Computing clutch performance...")
+    logger.info("Computing clutch performance...")
     
     # Get games that were close in the last 5 minutes
     query = """
@@ -498,7 +530,7 @@ def compute_clutch_performance(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame:
         "visitor_scored": "sum"
     }).reset_index()
     
-    print(f"✓ Computed clutch performance for {len(clutch_performance)} games")
+    logger.info(f"Computed clutch performance for {len(clutch_performance)} games")
     return clutch_performance
 
 
@@ -508,17 +540,20 @@ def compute_timeout_effectiveness(conn: duckdb.DuckDBPyConnection) -> pd.DataFra
     
     Returns DataFrame with timeout effectiveness metrics.
     """
-    print("Computing timeout effectiveness...")
+    logger.info("Computing timeout effectiveness...")
     
     # Find timeout events (event_msg_type 9 = timeout)
-    query = """
+    # Check available columns first
+    available_cols = conn.execute("DESCRIBE playbyplay").fetchdf()["column_name"].tolist()
+    select_cols = ["game_id", "period", "game_time_seconds", "event_msg_type", "visitor_score", "home_score"]
+    if "home_description" in available_cols:
+        select_cols.append("home_description")
+    if "visitor_description" in available_cols:
+        select_cols.append("visitor_description")
+    
+    query = f"""
         SELECT 
-            game_id,
-            period,
-            game_time_seconds,
-            event_msg_type,
-            visitor_score,
-            home_score
+            {', '.join(select_cols)}
         FROM playbyplay
         WHERE event_msg_type = 9  -- Timeout
             OR (home_description LIKE '%Timeout%' OR visitor_description LIKE '%Timeout%')
@@ -530,12 +565,27 @@ def compute_timeout_effectiveness(conn: duckdb.DuckDBPyConnection) -> pd.DataFra
     if timeouts.empty:
         return pd.DataFrame()
     
-    # Get scoring before and after timeouts
+    # Get scoring before and after timeouts from the perspective of the team that called it
     timeout_effectiveness = []
     
     for idx, timeout in timeouts.iterrows():
         game_id = timeout["game_id"]
         timeout_time = timeout["game_time_seconds"]
+        
+        # Determine which team called the timeout
+        # If home_description has timeout, home team called it; if visitor_description has it, visitor called it
+        home_called = False
+        visitor_called = False
+        if "home_description" in timeout and pd.notna(timeout["home_description"]):
+            if "Timeout" in str(timeout["home_description"]):
+                home_called = True
+        if "visitor_description" in timeout and pd.notna(timeout["visitor_description"]):
+            if "Timeout" in str(timeout["visitor_description"]):
+                visitor_called = True
+        
+        # If we can't determine, skip (or default to home if both are None)
+        if not home_called and not visitor_called:
+            continue
         
         # Get scores before and after timeout
         before_query = f"""
@@ -564,21 +614,47 @@ def compute_timeout_effectiveness(conn: duckdb.DuckDBPyConnection) -> pd.DataFra
         after = conn.execute(after_query).fetchdf()
         
         if len(before) > 0 and len(after) > 0:
-            before_score = before.iloc[0]["visitor_score"] + before.iloc[0]["home_score"]
-            after_score = after.iloc[0]["visitor_score"] + after.iloc[0]["home_score"]
+            before_home = before.iloc[0]["home_score"]
+            before_visitor = before.iloc[0]["visitor_score"]
+            after_home = after.iloc[0]["home_score"]
+            after_visitor = after.iloc[0]["visitor_score"]
+            
+            # Calculate score change from the perspective of the team that called the timeout
+            if home_called:
+                team_score_before = before_home
+                team_score_after = after_home
+                opponent_score_before = before_visitor
+                opponent_score_after = after_visitor
+                team_type = "home"
+            else:  # visitor_called
+                team_score_before = before_visitor
+                team_score_after = after_visitor
+                opponent_score_before = before_home
+                opponent_score_after = after_home
+                team_type = "visitor"
+            
+            # Net change: positive = team that called timeout scored more than opponent in next 2 min
+            team_change = team_score_after - team_score_before
+            opponent_change = opponent_score_after - opponent_score_before
+            net_change = team_change - opponent_change  # Positive = timeout worked (team outscored opponent)
             
             timeout_effectiveness.append({
                 "game_id": game_id,
                 "timeout_time": timeout_time,
                 "period": timeout["period"],
-                "score_before": before_score,
-                "score_after": after_score,
-                "score_change": after_score - before_score
+                "team_type": team_type,
+                "team_score_before": team_score_before,
+                "team_score_after": team_score_after,
+                "opponent_score_before": opponent_score_before,
+                "opponent_score_after": opponent_score_after,
+                "team_change": team_change,
+                "opponent_change": opponent_change,
+                "net_change": net_change  # Positive = team that called timeout did better
             })
     
     effectiveness_df = pd.DataFrame(timeout_effectiveness)
     
-    print(f"✓ Computed timeout effectiveness for {len(effectiveness_df)} timeouts")
+    logger.info(f"Computed timeout effectiveness for {len(effectiveness_df)} timeouts")
     return effectiveness_df
 
 
@@ -588,17 +664,14 @@ def compute_overtime_predictors(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame
     
     Returns DataFrame with overtime game characteristics.
     """
-    print("Computing overtime predictors...")
+    logger.info("Computing overtime predictors...")
     
     # Find games that went to overtime (period > 4)
     query = """
         SELECT 
             game_id,
             MAX(period) as max_period,
-            COUNT(DISTINCT period) as num_periods,
-            MAX(visitor_score) as final_visitor_score,
-            MAX(home_score) as final_home_score,
-            ABS(MAX(home_score) - MAX(visitor_score)) as final_margin
+            COUNT(DISTINCT period) as num_periods
         FROM playbyplay
         WHERE visitor_score IS NOT NULL AND home_score IS NOT NULL
         GROUP BY game_id
@@ -613,7 +686,39 @@ def compute_overtime_predictors(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame
     for game_id in game_stats["game_id"].unique():
         game_stat = game_stats[game_stats["game_id"] == game_id].iloc[0]
         
-        # Get lead changes, close quarters, etc.
+        # Get score with 5 MINUTES LEFT in regulation (at 43 minutes) - this is what predicts OT!
+        # We want to predict based on game state BEFORE we know the outcome
+        five_min_left_time = 43 * 60  # 43 minutes = 5 minutes before end of regulation
+        
+        margin_at_5min_query = f"""
+            SELECT 
+                visitor_score,
+                home_score,
+                ABS(home_score - visitor_score) as margin
+            FROM playbyplay
+            WHERE game_id = '{game_id}'
+                AND visitor_score IS NOT NULL AND home_score IS NOT NULL
+                AND game_time_seconds <= {five_min_left_time}
+                AND game_time_seconds >= {five_min_left_time - 60}  -- Within 1 minute of target
+            ORDER BY ABS(game_time_seconds - {five_min_left_time})
+            LIMIT 1
+        """
+        
+        margin_5min = conn.execute(margin_at_5min_query).fetchdf()
+        
+        # Get final score (including OT if it happened) for reference
+        final_query = f"""
+            SELECT 
+                MAX(visitor_score) as final_visitor_score,
+                MAX(home_score) as final_home_score
+            FROM playbyplay
+            WHERE game_id = '{game_id}'
+                AND visitor_score IS NOT NULL AND home_score IS NOT NULL
+        """
+        
+        final = conn.execute(final_query).fetchdf()
+        
+        # Get lead changes, close quarters, etc. during REGULATION
         detail_query = f"""
             SELECT 
                 COUNT(*) as total_events,
@@ -628,20 +733,27 @@ def compute_overtime_predictors(conn: duckdb.DuckDBPyConnection) -> pd.DataFrame
         
         details = conn.execute(detail_query).fetchdf()
         
-        if len(details) > 0:
+        if len(margin_5min) > 0 and len(final) > 0 and len(details) > 0:
+            # Margin with 5 minutes left in regulation - this predicts OT!
+            margin_at_5min = margin_5min.iloc[0]["margin"]
+            
+            # Final margin (after OT if it happened) - for reference
+            final_margin = abs(final.iloc[0]["final_home_score"] - final.iloc[0]["final_visitor_score"])
+            
             characteristics.append({
                 "game_id": game_id,
                 "went_to_overtime": game_stat["went_to_overtime"],
-                "final_margin": game_stat["final_margin"],
+                "margin_at_5min": margin_at_5min,  # Margin with 5 min left (predictor)
+                "final_margin": final_margin,  # Final margin including OT (reference)
                 "max_lead": details.iloc[0]["max_lead"],
                 "min_lead": details.iloc[0]["min_lead"],
                 "total_events": details.iloc[0]["total_events"],
-                "close_game": 1 if game_stat["final_margin"] <= 5 else 0
+                "close_game": 1 if margin_at_5min <= 5 else 0  # Close with 5 min left (≤5 pts)
             })
     
     predictors_df = pd.DataFrame(characteristics)
     
-    print(f"✓ Computed overtime predictors for {len(predictors_df)} games")
+    logger.info(f"Computed overtime predictors for {len(predictors_df)} games")
     return predictors_df
 
 
@@ -659,11 +771,12 @@ def main():
         )
     
     # Connect to DuckDB
-    print(f"Connecting to DuckDB: {db_file}")
+    logger.info(f"Connecting to DuckDB: {db_file}")
     conn = duckdb.connect(str(db_file))
     
     try:
         # Compute all metrics
+        logger.info("Starting metric computation...")
         scoring_runs = compute_scoring_runs(conn)
         droughts = compute_droughts(conn)
         foul_freq = compute_foul_frequencies(conn)
@@ -675,7 +788,7 @@ def main():
         overtime_pred = compute_overtime_predictors(conn)
         
         # Save to DuckDB
-        print("\nSaving metrics to DuckDB...")
+        logger.info("Saving metrics to DuckDB...")
         conn.execute("DROP TABLE IF EXISTS scoring_runs")
         conn.execute("DROP TABLE IF EXISTS droughts")
         conn.execute("DROP TABLE IF EXISTS foul_frequencies")
@@ -727,33 +840,33 @@ def main():
             overtime_pred.to_csv(output_dir / "overtime_predictors.csv", index=False)
         
         # Print summary
-        print("\n" + "="*60)
-        print("Metrics Summary")
-        print("="*60)
+        logger.info("=" * 60)
+        logger.info("Metrics Summary")
+        logger.info("=" * 60)
         if not scoring_runs.empty:
-            print(f"Scoring runs: {len(scoring_runs):,}")
-            print(f"  Average run length: {scoring_runs['run_length'].mean():.2f}")
+            logger.info(f"Scoring runs: {len(scoring_runs):,}")
+            logger.info(f"  Average run length: {scoring_runs['run_length'].mean():.2f}")
         if not droughts.empty:
-            print(f"Scoring droughts: {len(droughts):,}")
-            print(f"  Average drought length: {droughts['drought_length'].mean():.2f}")
+            logger.info(f"Scoring droughts: {len(droughts):,}")
+            logger.info(f"  Average drought length: {droughts['drought_length'].mean():.2f}")
         if not foul_freq.empty:
-            print(f"Foul frequency records: {len(foul_freq):,}")
+            logger.info(f"Foul frequency records: {len(foul_freq):,}")
         if not pace_metrics.empty:
-            print(f"Pace metrics: {len(pace_metrics):,}")
-            print(f"  Average pace: {pace_metrics['pace'].mean():.2f} possessions/min")
+            logger.info(f"Pace metrics: {len(pace_metrics):,}")
+            logger.info(f"  Average pace: {pace_metrics['pace'].mean():.2f} possessions/min")
         if not momentum.empty:
-            print(f"Momentum records: {len(momentum):,}")
+            logger.info(f"Momentum records: {len(momentum):,}")
         if not comeback_prob.empty:
-            print(f"Comeback probability records: {len(comeback_prob):,}")
+            logger.info(f"Comeback probability records: {len(comeback_prob):,}")
         if not clutch_perf.empty:
-            print(f"Clutch performance records: {len(clutch_perf):,}")
+            logger.info(f"Clutch performance records: {len(clutch_perf):,}")
         if not timeout_effect.empty:
-            print(f"Timeout effectiveness records: {len(timeout_effect):,}")
+            logger.info(f"Timeout effectiveness records: {len(timeout_effect):,}")
         if not overtime_pred.empty:
             ot_games = overtime_pred["went_to_overtime"].sum()
-            print(f"Overtime predictors: {len(overtime_pred):,} games ({ot_games} went to OT)")
+            logger.info(f"Overtime predictors: {len(overtime_pred):,} games ({ot_games} went to OT)")
         
-        print(f"\n✓ Metrics saved to DuckDB and CSV files in {output_dir}")
+        logger.info(f"Metrics saved to DuckDB and CSV files in {output_dir}")
         
     finally:
         conn.close()

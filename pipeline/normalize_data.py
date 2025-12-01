@@ -10,6 +10,14 @@ import pandas as pd
 from pathlib import Path
 from typing import List, Dict, Optional
 import numpy as np
+import sys
+
+# Add parent directory to path for utils
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils.logging_config import setup_logging, get_logger
+
+# Set up logging
+logger = setup_logging(log_level="INFO")
 
 
 def load_playbyplay_file(file_path: Path) -> Optional[Dict]:
@@ -18,7 +26,7 @@ def load_playbyplay_file(file_path: Path) -> Optional[Dict]:
         with open(file_path, "r") as f:
             return json.load(f)
     except Exception as e:
-        print(f"  ⚠ Error loading {file_path.name}: {e}")
+        logger.warning(f"Error loading {file_path.name}: {e}")
         return None
 
 
@@ -145,7 +153,7 @@ def main():
     
     # Get all JSON files
     pbp_files = list(input_dir.glob("*.json"))
-    print(f"Found {len(pbp_files)} play-by-play files to process")
+    logger.info(f"Found {len(pbp_files)} play-by-play files to process")
     
     # Process each file
     all_events = []
@@ -166,39 +174,39 @@ def main():
             else:
                 failed += 1
         except Exception as e:
-            print(f"  ⚠ Error processing {pbp_file.name}: {e}")
+            logger.warning(f"Error processing {pbp_file.name}: {e}")
             failed += 1
     
     if not all_events:
-        print("⚠ No events to process")
+        logger.warning("No events to process")
         return
     
     # Combine all events
-    print(f"\nCombining {len(all_events)} game dataframes...")
+    logger.info(f"Combining {len(all_events)} game dataframes...")
     combined_df = pd.concat(all_events, ignore_index=True)
     
-    print(f"✓ Normalized {len(combined_df):,} events from {successful} games")
-    print(f"  Failed: {failed}")
+    logger.info(f"Normalized {len(combined_df):,} events from {successful} games")
+    logger.info(f"  Failed: {failed}")
     
     # Save to Parquet
     output_file = output_dir / "playbyplay_normalized.parquet"
-    print(f"\nSaving to {output_file}...")
+    logger.info(f"Saving to {output_file}...")
     combined_df.to_parquet(output_file, index=False, compression="snappy")
     
-    print(f"✓ Saved {len(combined_df):,} events to Parquet")
-    print(f"  File size: {output_file.stat().st_size / 1024 / 1024:.2f} MB")
+    logger.info(f"Saved {len(combined_df):,} events to Parquet")
+    logger.info(f"  File size: {output_file.stat().st_size / 1024 / 1024:.2f} MB")
     
     # Print summary statistics
-    print("\n" + "="*60)
-    print("Data Summary")
-    print("="*60)
-    print(f"Total events: {len(combined_df):,}")
-    print(f"Unique games: {combined_df['game_id'].nunique()}")
+    logger.info("=" * 60)
+    logger.info("Data Summary")
+    logger.info("=" * 60)
+    logger.info(f"Total events: {len(combined_df):,}")
+    logger.info(f"Unique games: {combined_df['game_id'].nunique()}")
     if "event_msg_type" in combined_df.columns:
-        print(f"\nEvent types:")
-        print(combined_df["event_msg_type"].value_counts().head(10))
+        logger.info("Event types:")
+        logger.info(combined_df["event_msg_type"].value_counts().head(10).to_string())
     if "period" in combined_df.columns:
-        print(f"\nPeriods: {combined_df['period'].min()} to {combined_df['period'].max()}")
+        logger.info(f"Periods: {combined_df['period'].min()} to {combined_df['period'].max()}")
 
 
 if __name__ == "__main__":

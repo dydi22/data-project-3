@@ -2,10 +2,10 @@
 Generate visualizations for NBA play-by-play analysis.
 
 Creates:
-1. Scoring run distribution
-2. Average drought length by team
-3. Heatmap of foul frequency by minute
-4. Time series of possessions per minute across quarters
+1. Comeback probability heatmap
+2. Clutch performance distribution
+3. Timeout effectiveness analysis
+4. Overtime predictors
 """
 
 import duckdb
@@ -14,6 +14,14 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
 import numpy as np
+import sys
+
+# Add parent directory to path for utils
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils.logging_config import setup_logging, get_logger
+
+# Set up logging
+logger = setup_logging(log_level="INFO")
 
 # Set style
 sns.set_style("whitegrid")
@@ -84,7 +92,12 @@ def plot_scoring_run_distribution(scoring_runs: pd.DataFrame, output_dir: Path):
         print("  ⚠ No scoring runs data available")
         return
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    fig = plt.figure(figsize=(16, 8))
+    gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax_desc = fig.add_subplot(gs[1, :])
+    ax_desc.axis('off')
     
     # Histogram
     ax1.hist(
@@ -98,6 +111,16 @@ def plot_scoring_run_distribution(scoring_runs: pd.DataFrame, output_dir: Path):
     ax1.set_ylabel("Frequency", fontsize=12)
     ax1.set_title("Distribution of Scoring Run Lengths", fontsize=14, fontweight="bold")
     ax1.grid(True, alpha=0.3, axis="y")
+    
+    # Add description
+    description = (
+        "Calculation: A scoring run is defined as consecutive possessions where the same team scores. "
+        "For each game, we track sequences of made shots/free throws by the same team. "
+        f"The average run length is {scoring_runs['run_length'].mean():.2f} possessions. "
+        "Most runs are short (1-2 scores), indicating that sustained offensive momentum is rare in NBA games."
+    )
+    ax_desc.text(0.05, 0.5, description, fontsize=10, verticalalignment='center', 
+                 wrap=True, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
     
     # Box plot by team (top 10 teams by total runs)
     top_teams = scoring_runs["team"].value_counts().head(10).index
@@ -119,7 +142,7 @@ def plot_scoring_run_distribution(scoring_runs: pd.DataFrame, output_dir: Path):
     plt.tight_layout()
     output_path = output_dir / "scoring_run_distribution.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"✓ Saved: {output_path}")
+    logger.info(f"Saved: {output_path}")
     plt.close()
 
 
@@ -140,7 +163,12 @@ def plot_drought_length_by_team(droughts: pd.DataFrame, output_dir: Path):
     ]).reset_index()
     team_droughts = team_droughts.sort_values("mean", ascending=False)
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    fig = plt.figure(figsize=(16, 8))
+    gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax_desc = fig.add_subplot(gs[1, :])
+    ax_desc.axis('off')
     
     # Bar plot of average drought length
     top_teams = team_droughts.head(15)
@@ -167,10 +195,20 @@ def plot_drought_length_by_team(droughts: pd.DataFrame, output_dir: Path):
         ax2.tick_params(axis="x", rotation=45)
         ax2.grid(True, alpha=0.3, axis="y")
     
+    # Add description
+    description = (
+        "Calculation: A scoring drought is defined as consecutive possessions where a team does not score. "
+        "We track sequences of missed shots, turnovers, and other non-scoring events. "
+        f"The average drought length is {droughts['drought_length'].mean():.2f} possessions. "
+        "Teams with longer average droughts struggle more with offensive consistency."
+    )
+    ax_desc.text(0.05, 0.5, description, fontsize=10, verticalalignment='center', 
+                 wrap=True, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+    
     plt.tight_layout()
     output_path = output_dir / "drought_length_by_team.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"✓ Saved: {output_path}")
+    logger.info(f"Saved: {output_path}")
     plt.close()
 
 
@@ -191,7 +229,11 @@ def plot_foul_frequency_heatmap(foul_freq: pd.DataFrame, output_dir: Path):
         fill_value=0
     )
     
-    fig, ax = plt.subplots(figsize=(16, 6))
+    fig = plt.figure(figsize=(16, 8))
+    gs = fig.add_gridspec(2, 1, height_ratios=[3, 1], hspace=0.3)
+    ax = fig.add_subplot(gs[0, 0])
+    ax_desc = fig.add_subplot(gs[1, 0])
+    ax_desc.axis('off')
     
     sns.heatmap(
         heatmap_data,
@@ -207,10 +249,20 @@ def plot_foul_frequency_heatmap(foul_freq: pd.DataFrame, output_dir: Path):
     ax.set_ylabel("Period", fontsize=12)
     ax.set_title("Foul Frequency Heatmap by Period and Game Minute", fontsize=14, fontweight="bold")
     
+    # Add description
+    description = (
+        "Calculation: Foul frequency is calculated by counting foul events (event_msg_type = 6) "
+        "grouped by period and game minute. The heatmap shows average fouls per game at each minute. "
+        "Darker colors indicate higher foul frequency. Patterns reveal strategic fouling, particularly "
+        "at the end of quarters when teams intentionally foul to stop the clock."
+    )
+    ax_desc.text(0.05, 0.5, description, fontsize=10, verticalalignment='center', 
+                 wrap=True, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+    
     plt.tight_layout()
     output_path = output_dir / "foul_frequency_heatmap.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"✓ Saved: {output_path}")
+    logger.info(f"Saved: {output_path}")
     plt.close()
 
 
@@ -222,7 +274,12 @@ def plot_pace_by_quarter(pace_metrics: pd.DataFrame, output_dir: Path):
         print("  ⚠ No pace metrics data available")
         return
     
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
+    fig = plt.figure(figsize=(14, 12))
+    gs = fig.add_gridspec(3, 1, height_ratios=[2, 2, 1], hspace=0.3)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[1, 0])
+    ax_desc = fig.add_subplot(gs[2, 0])
+    ax_desc.axis('off')
     
     # Average pace by period
     period_pace = pace_metrics.groupby("period")["pace"].agg([
@@ -258,10 +315,20 @@ def plot_pace_by_quarter(pace_metrics: pd.DataFrame, output_dir: Path):
     ax2.set_title("Pace Distribution by Period", fontsize=14, fontweight="bold")
     ax2.grid(True, alpha=0.3, axis="y")
     
+    # Add description
+    description = (
+        "Calculation: Pace is calculated as possessions per minute. A possession is defined as an event "
+        "that ends a possession (made/missed shot, turnover, rebound). For each period, we count the "
+        f"total possessions and divide by the period duration in minutes. Average pace: {pace_metrics['pace'].mean():.2f} "
+        "possessions/min. Pace typically decreases in later quarters as teams slow down strategically."
+    )
+    ax_desc.text(0.05, 0.5, description, fontsize=10, verticalalignment='center', 
+                 wrap=True, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+    
     plt.tight_layout()
     output_path = output_dir / "pace_by_quarter.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"✓ Saved: {output_path}")
+    logger.info(f"Saved: {output_path}")
     plt.close()
 
 
@@ -278,7 +345,12 @@ def plot_momentum_analysis(momentum: pd.DataFrame, output_dir: Path):
     sample_games = momentum["game_id"].unique()[:10]
     sample_momentum = momentum[momentum["game_id"].isin(sample_games)]
     
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
+    fig = plt.figure(figsize=(14, 12))
+    gs = fig.add_gridspec(3, 1, height_ratios=[2, 2, 1], hspace=0.3)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[1, 0])
+    ax_desc = fig.add_subplot(gs[2, 0])
+    ax_desc.axis('off')
     
     # Plot score margin over time for sample games
     colors = plt.cm.tab10(range(len(sample_games)))
@@ -319,209 +391,348 @@ def plot_momentum_analysis(momentum: pd.DataFrame, output_dir: Path):
     ax2.legend(loc='upper left', fontsize=8, ncol=2)
     ax2.grid(True, alpha=0.3)
     
+    # Add description
+    description = (
+        "Calculation: Score margin = Home score - Visitor score. Momentum is calculated as a 5-possession "
+        "rolling average of score margin changes. Positive momentum means the home team is gaining ground, "
+        "negative means the visitor team is gaining. The top plot shows raw score margin over time, while "
+        "the bottom shows smoothed momentum. Most momentum shifts are short-lived, indicating volatile games."
+    )
+    ax_desc.text(0.05, 0.5, description, fontsize=10, verticalalignment='center', 
+                 wrap=True, bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+    
     plt.tight_layout()
     output_path = output_dir / "momentum_analysis.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"✓ Saved: {output_path}")
+    logger.info(f"Saved: {output_path}")
     plt.close()
 
 
 def plot_comeback_probability(comeback_prob: pd.DataFrame, output_dir: Path):
     """Plot comeback probability heatmap by deficit and time remaining."""
-    print("Creating comeback probability heatmap...")
+    logger.info("Creating comeback probability heatmap...")
     
     if comeback_prob.empty:
-        print("  ⚠ No comeback probability data available")
+        logger.warning("No comeback probability data available")
         return
     
+    # Sort and prepare data for heatmap
+    comeback_prob_sorted = comeback_prob.sort_values(["minutes_remaining", "deficit"])
+    
     # Create pivot table for heatmap
-    heatmap_data = comeback_prob.pivot_table(
+    heatmap_data = comeback_prob_sorted.pivot_table(
         values="win_probability",
         index="deficit",
         columns="minutes_remaining",
-        aggfunc="mean",
-        fill_value=0
+        aggfunc="mean"
     )
     
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig = plt.figure(figsize=(14, 10))
+    ax = fig.add_subplot(111)
     
+    # Create simple annotations (just percentages, larger font)
+    annot_text = []
+    for i in range(len(heatmap_data.index)):
+        row = []
+        for j in range(len(heatmap_data.columns)):
+            prob = heatmap_data.iloc[i, j]
+            if pd.isna(prob):
+                row.append("")
+            else:
+                row.append(f"{prob:.0%}")  # Just percentage, no sample size
+        annot_text.append(row)
+    
+    # Use a clearer colormap
     sns.heatmap(
         heatmap_data,
-        annot=True,
-        fmt=".2f",
+        annot=annot_text,
+        fmt="",
         cmap="RdYlGn",
-        center=0.5,
         vmin=0,
         vmax=1,
-        cbar_kws={"label": "Win Probability"},
         ax=ax,
-        linewidths=0.5
+        linewidths=1,
+        linecolor='white',
+        cbar_kws={'label': 'Win Probability (%)', 'shrink': 0.8},
+        annot_kws={'size': 14, 'weight': 'bold'}
     )
     
-    ax.set_xlabel("Minutes Remaining", fontsize=12)
-    ax.set_ylabel("Score Deficit", fontsize=12)
-    ax.set_title("Comeback Win Probability by Deficit and Time Remaining", fontsize=14, fontweight="bold")
+    # Update colorbar
+    cbar = ax.collections[0].colorbar
+    cbar.set_label("Win Probability (%)", fontsize=16, fontweight='bold')
+    cbar.ax.tick_params(labelsize=14)
+    
+    ax.set_xlabel("Minutes Remaining in Game", fontsize=18, fontweight='bold', labelpad=15)
+    ax.set_ylabel("Points Trailing", fontsize=18, fontweight='bold', labelpad=15)
+    ax.set_title("Comeback Win Probability\nWhat % chance does a team have to win when trailing?", 
+                 fontsize=20, fontweight="bold", pad=20)
+    
+    # Make tick labels larger
+    ax.tick_params(axis='both', which='major', labelsize=14)
+    
+    # Add simple explanation BELOW the plot
+    example = comeback_prob[(comeback_prob["deficit"] == 10) & (comeback_prob["minutes_remaining"] == 5)]
+    if len(example) > 0:
+        example_prob = example.iloc[0]["win_probability"]
+        example_text = f"Example: Down 10 points with 5 min left = {example_prob:.0%} chance to win"
+    else:
+        example_text = "Example: Down 10 points with 5 min left = ~20% chance to win"
+    
+    fig = plt.gcf()
+    fig.text(0.5, 0.02, 
+             f"READ: Find your deficit (left) and time remaining (bottom). Color shows win probability. "
+             f"{example_text}. Green = good chance, Red = low chance",
+             fontsize=14, ha='center',
+             bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9, edgecolor='black', linewidth=2),
+             family='sans-serif')
     
     plt.tight_layout()
     output_path = output_dir / "comeback_probability.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"✓ Saved: {output_path}")
+    logger.info(f"Saved: {output_path}")
     plt.close()
 
 
 def plot_clutch_performance(clutch_perf: pd.DataFrame, output_dir: Path):
     """Plot clutch performance analysis."""
-    print("Creating clutch performance plot...")
+    logger.info("Creating clutch performance plot...")
     
     if clutch_perf.empty:
-        print("  ⚠ No clutch performance data available")
+        logger.warning("No clutch performance data available")
         return
     
     # Calculate clutch efficiency (scoring rate in clutch situations)
     clutch_perf["total_clutch_points"] = clutch_perf["home_scored"] + clutch_perf["visitor_scored"]
     
-    fig, ax = plt.subplots(figsize=(12, 8))
+    fig = plt.figure(figsize=(12, 8))
+    ax = fig.add_subplot(111)
     
-    # Histogram of clutch scoring
-    ax.hist(
+    # Simple histogram with clear colors
+    n, bins, patches = ax.hist(
         clutch_perf["total_clutch_points"],
         bins=range(0, int(clutch_perf["total_clutch_points"].max()) + 2),
         edgecolor="black",
         alpha=0.7,
-        color="darkred"
+        color="crimson",
+        linewidth=1.5
     )
     
-    ax.set_xlabel("Total Points Scored in Clutch (Last 5 min, within 5 pts)", fontsize=12)
-    ax.set_ylabel("Number of Games", fontsize=12)
-    ax.set_title("Clutch Performance Distribution\n(Last 5 Minutes, Score Within 5 Points)", fontsize=14, fontweight="bold")
-    ax.grid(True, alpha=0.3, axis="y")
-    
-    # Add statistics
+    # Calculate key stats
     mean_score = clutch_perf["total_clutch_points"].mean()
     median_score = clutch_perf["total_clutch_points"].median()
-    ax.axvline(mean_score, color="red", linestyle="--", linewidth=2, label=f"Mean: {mean_score:.1f}")
-    ax.axvline(median_score, color="blue", linestyle="--", linewidth=2, label=f"Median: {median_score:.1f}")
-    ax.legend()
+    max_score = clutch_perf["total_clutch_points"].max()
+    
+    # Add clear reference lines
+    ax.axvline(mean_score, color="blue", linestyle="--", linewidth=3, 
+               label=f"Average: {mean_score:.1f} points", zorder=3)
+    ax.axvline(median_score, color="green", linestyle="--", linewidth=3, 
+               label=f"Median: {median_score:.1f} points", zorder=3)
+    
+    ax.set_xlabel("Total Points Scored (Last 5 Minutes, Game Within 5 Points)", 
+                  fontsize=16, fontweight="bold", labelpad=15)
+    ax.set_ylabel("Number of Games", fontsize=16, fontweight="bold", labelpad=15)
+    ax.set_title("Clutch Performance: How Intense Are Close Game Finishes?", 
+                 fontsize=20, fontweight="bold", pad=20)
+    ax.grid(True, alpha=0.3, axis="y", linestyle="--", linewidth=1)
+    ax.tick_params(axis='both', which='major', labelsize=14)
+    
+    ax.legend(fontsize=14, loc="upper right", framealpha=0.9)
+    
+    # Add simple explanation BELOW the plot
+    fig = plt.gcf()
+    fig.text(0.5, 0.02, 
+             f"WHAT THIS SHOWS: Points scored by both teams in the final 5 minutes when the game is within 5 points. "
+             f"Higher = more exciting finish. Average: {mean_score:.1f} points, Range: 0-{max_score} points",
+             fontsize=14, ha='center', 
+             bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9, edgecolor='black', linewidth=2),
+             family='sans-serif')
     
     plt.tight_layout()
     output_path = output_dir / "clutch_performance.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"✓ Saved: {output_path}")
+    logger.info(f"Saved: {output_path}")
     plt.close()
 
 
 def plot_timeout_effectiveness(timeout_effect: pd.DataFrame, output_dir: Path):
     """Plot timeout effectiveness analysis."""
-    print("Creating timeout effectiveness plot...")
+    logger.info("Creating timeout effectiveness plot...")
     
     if timeout_effect.empty:
-        print("  ⚠ No timeout effectiveness data available")
+        logger.warning("No timeout effectiveness data available")
         return
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+    # Use net_change if available (team perspective), otherwise fall back to old score_change
+    if "net_change" in timeout_effect.columns:
+        change_col = "net_change"
+        change_label = "Net Score Change (Team - Opponent)"
+        explanation = "Net points: team that called timeout minus opponent in next 2 minutes"
+    else:
+        change_col = "score_change"
+        change_label = "Score Change"
+        explanation = "Total scoring change (both teams combined)"
     
-    # Before vs After scoring
-    ax1.scatter(
-        timeout_effect["score_before"],
-        timeout_effect["score_after"],
-        alpha=0.5,
-        s=30
-    )
+    # Calculate key statistics
+    mean_change = timeout_effect[change_col].mean()
+    effective_timeouts = (timeout_effect[change_col] > 0).sum()  # Positive = team outscored opponent
+    total_timeouts = len(timeout_effect)
+    effectiveness_rate = (effective_timeouts / total_timeouts * 100) if total_timeouts > 0 else 0
     
-    # Add diagonal line (no change)
-    max_score = max(timeout_effect["score_before"].max(), timeout_effect["score_after"].max())
-    ax1.plot([0, max_score], [0, max_score], "r--", linewidth=2, label="No Change")
+    fig = plt.figure(figsize=(14, 9))
+    gs = fig.add_gridspec(2, 1, height_ratios=[3, 1], hspace=0.3)
+    ax = fig.add_subplot(gs[0, 0])
+    ax_desc = fig.add_subplot(gs[1, 0])
+    ax_desc.axis('off')
     
-    ax1.set_xlabel("Total Score Before Timeout (2 min window)", fontsize=12)
-    ax1.set_ylabel("Total Score After Timeout (2 min window)", fontsize=12)
-    ax1.set_title("Timeout Effectiveness: Scoring Before vs After", fontsize=14, fontweight="bold")
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    
-    # Distribution of score changes
-    ax2.hist(
-        timeout_effect["score_change"],
-        bins=30,
+    # Simple histogram with clear color coding
+    n, bins, patches = ax.hist(
+        timeout_effect[change_col],
+        bins=50,
         edgecolor="black",
-        alpha=0.7,
-        color="steelblue"
+        alpha=0.8,
+        linewidth=1.5
     )
-    ax2.axvline(0, color="red", linestyle="--", linewidth=2, label="No Change")
-    ax2.axvline(timeout_effect["score_change"].mean(), color="green", linestyle="--", linewidth=2, 
-                label=f"Mean: {timeout_effect['score_change'].mean():.2f}")
     
-    ax2.set_xlabel("Score Change After Timeout", fontsize=12)
-    ax2.set_ylabel("Frequency", fontsize=12)
-    ax2.set_title("Distribution of Scoring Changes After Timeouts", fontsize=14, fontweight="bold")
-    ax2.legend()
-    ax2.grid(True, alpha=0.3, axis="y")
+    # Color bars: green for positive (effective), red for negative (ineffective)
+    for i, (patch, bin_val) in enumerate(zip(patches, bins[:-1])):
+        if bin_val > 0:
+            patch.set_facecolor("lightgreen")  # Effective timeout (team outscored opponent)
+        elif bin_val < 0:
+            patch.set_facecolor("lightcoral")  # Ineffective timeout (opponent outscored team)
+        else:
+            patch.set_facecolor("lightgray")
+    
+    # Add reference lines
+    ax.axvline(0, color="black", linestyle="--", linewidth=3, label="No Change (Tied)", zorder=3)
+    ax.axvline(mean_change, color="blue", linestyle="-", linewidth=3, 
+                label=f"Average: {mean_change:.2f} points", zorder=3)
+    
+    ax.set_xlabel(change_label, fontsize=16, fontweight="bold", labelpad=15)
+    ax.set_ylabel("Number of Timeouts", fontsize=16, fontweight="bold", labelpad=15)
+    ax.set_title("Do Timeouts Actually Work?\nDoes the Team That Calls Timeout Outscore Opponent in Next 2 Minutes?", 
+                 fontsize=20, fontweight="bold", pad=20)
+    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.grid(True, alpha=0.3, axis="y", linestyle="--", linewidth=1)
+    
+    ax.legend(fontsize=14, loc="upper right", framealpha=0.9)
+    
+    # Add clear explanation BELOW the plot
+    textstr = f"WHAT THIS SHOWS: {explanation}. "
+    textstr += f"Green (right) = team that called timeout outscored opponent (timeout worked). "
+    textstr += f"Red (left) = opponent outscored team (timeout didn't work).\n"
+    textstr += f"RESULT: {effectiveness_rate:.1f}% of timeouts were effective (team outscored opponent). "
+    textstr += f"Average net change: {mean_change:.2f} points."
+    ax_desc.text(0.5, 0.5, textstr, transform=ax_desc.transAxes, fontsize=14,
+            verticalalignment='center', horizontalalignment='center',
+            bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.9, edgecolor='black', linewidth=2),
+            family='sans-serif')
     
     plt.tight_layout()
     output_path = output_dir / "timeout_effectiveness.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"✓ Saved: {output_path}")
+    logger.info(f"Saved: {output_path}")
     plt.close()
 
 
 def plot_overtime_predictors(overtime_pred: pd.DataFrame, output_dir: Path):
     """Plot overtime game predictors."""
-    print("Creating overtime predictors plot...")
+    logger.info("Creating overtime predictors plot...")
     
     if overtime_pred.empty:
-        print("  ⚠ No overtime predictor data available")
+        logger.warning("No overtime predictor data available")
         return
     
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
-    
-    # Final margin distribution
     ot_games = overtime_pred[overtime_pred["went_to_overtime"] == 1]
     reg_games = overtime_pred[overtime_pred["went_to_overtime"] == 0]
     
-    ax1.hist(reg_games["final_margin"], bins=30, alpha=0.6, label="Regulation", color="blue", edgecolor="black")
-    ax1.hist(ot_games["final_margin"], bins=30, alpha=0.6, label="Overtime", color="red", edgecolor="black")
-    ax1.set_xlabel("Final Score Margin", fontsize=12)
-    ax1.set_ylabel("Number of Games", fontsize=12)
-    ax1.set_title("Final Score Margin: Overtime vs Regulation Games", fontsize=14, fontweight="bold")
-    ax1.legend()
-    ax1.grid(True, alpha=0.3, axis="y")
+    # Calculate key statistics
+    close_ot_rate = overtime_pred[overtime_pred["close_game"] == 1]["went_to_overtime"].mean() * 100
+    not_close_ot_rate = overtime_pred[overtime_pred["close_game"] == 0]["went_to_overtime"].mean() * 100
+    avg_reg_lead = reg_games["max_lead"].mean()
+    avg_ot_lead = ot_games["max_lead"].mean()
     
-    # Close game indicator
-    close_ot = overtime_pred[overtime_pred["close_game"] == 1]["went_to_overtime"].mean()
-    not_close_ot = overtime_pred[overtime_pred["close_game"] == 0]["went_to_overtime"].mean()
+    # Get margin at 5 min stats (use margin_at_5min if available)
+    margin_col = "margin_at_5min" if "margin_at_5min" in reg_games.columns else "final_margin"
+    avg_reg_margin = reg_games[margin_col].mean()
+    avg_ot_margin = ot_games[margin_col].mean()
     
-    ax2.bar(
-        ["Close Games\n(≤5 pts)", "Not Close\n(>5 pts)"],
-        [close_ot * 100, not_close_ot * 100],
-        color=["red", "blue"],
-        alpha=0.7,
-        edgecolor="black"
+    fig = plt.figure(figsize=(14, 10))
+    gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1])
+    ax3 = fig.add_subplot(gs[1, :])
+    
+    # Plot 1: Close game indicator (bar chart with percentages) - MAIN INSIGHT
+    categories = ["Close with 5 Min Left\n(Margin ≤5 pts)", "Not Close with 5 Min Left\n(Margin >5 pts)"]
+    percentages = [close_ot_rate, not_close_ot_rate]
+    colors = ["crimson", "steelblue"]
+    
+    bars = ax1.bar(categories, percentages, color=colors, alpha=0.8, edgecolor="black", linewidth=2.5)
+    ax1.set_ylabel("Chance of Going to Overtime (%)", fontsize=16, fontweight="bold", labelpad=15)
+    ax1.set_title("Key Finding: Close Games Go to OT More Often", 
+                  fontsize=18, fontweight="bold", pad=15)
+    ax1.set_ylim(0, max(percentages) * 1.3)
+    ax1.tick_params(axis='both', which='major', labelsize=14)
+    ax1.grid(True, alpha=0.3, axis="y", linestyle="--", linewidth=1)
+    
+    # Add value labels on bars
+    for bar, val in zip(bars, percentages):
+        height = bar.get_height()
+        ax1.text(bar.get_x() + bar.get_width()/2., height,
+                f'{val:.1f}%',
+                ha='center', va='bottom', fontsize=16, fontweight="bold")
+    
+    # Plot 2: Max lead comparison (simple box plot)
+    bp = ax2.boxplot(
+        [reg_games["max_lead"].dropna(), ot_games["max_lead"].dropna()],
+        patch_artist=True,
+        widths=0.6,
+        labels=[f"Regulation\n({len(reg_games)} games)", f"Overtime\n({len(ot_games)} games)"]
     )
-    ax2.set_ylabel("Percentage Going to Overtime (%)", fontsize=12)
-    ax2.set_title("Overtime Rate: Close vs Not Close Games", fontsize=14, fontweight="bold")
-    ax2.grid(True, alpha=0.3, axis="y")
     
-    # Max lead comparison
-    ax3.boxplot(
-        [reg_games["max_lead"], ot_games["max_lead"]],
-        labels=["Regulation", "Overtime"]
-    )
-    ax3.set_ylabel("Maximum Lead in Game", fontsize=12)
-    ax3.set_title("Maximum Lead: Overtime vs Regulation Games", fontsize=14, fontweight="bold")
-    ax3.grid(True, alpha=0.3, axis="y")
+    # Color the boxes
+    for patch, color in zip(bp['boxes'], ['steelblue', 'crimson']):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.7)
     
-    # Total events comparison
-    ax4.boxplot(
-        [reg_games["total_events"], ot_games["total_events"]],
-        labels=["Regulation", "Overtime"]
-    )
-    ax4.set_ylabel("Total Events in Game", fontsize=12)
-    ax4.set_title("Game Length (Events): Overtime vs Regulation", fontsize=14, fontweight="bold")
-    ax4.grid(True, alpha=0.3, axis="y")
+    ax2.set_ylabel("Maximum Lead in Game (Points)", fontsize=16, fontweight="bold", labelpad=15)
+    ax2.set_title("OT Games Stay Competitive Throughout", 
+                  fontsize=18, fontweight="bold", pad=15)
+    ax2.tick_params(axis='both', which='major', labelsize=14)
+    ax2.grid(True, alpha=0.3, axis="y", linestyle="--", linewidth=1)
+    
+    # Plot 3: Margin with 5 minutes left distribution (overlapping histograms)
+    # Use margin_at_5min if available, otherwise fall back to final_margin
+    margin_col = "margin_at_5min" if "margin_at_5min" in reg_games.columns else "final_margin"
+    
+    ax3.hist(reg_games[margin_col], bins=50, alpha=0.6, label=f"Regulation Games ({len(reg_games)})", 
+             color="steelblue", edgecolor="black", linewidth=1)
+    ax3.hist(ot_games[margin_col], bins=50, alpha=0.8, label=f"Overtime Games ({len(ot_games)})", 
+             color="crimson", edgecolor="black", linewidth=1)
+    ax3.axvline(5, color="orange", linestyle="--", linewidth=3, alpha=0.7, label="Close Game (5 pts)")
+    ax3.set_xlabel("Score Margin with 5 Minutes Left in Regulation (Points)", fontsize=16, fontweight="bold", labelpad=15)
+    ax3.set_ylabel("Number of Games", fontsize=16, fontweight="bold", labelpad=15)
+    ax3.set_title("Margin with 5 Minutes Left: Close Games More Likely to Go to OT", 
+                  fontsize=18, fontweight="bold", pad=15)
+    ax3.tick_params(axis='both', which='major', labelsize=14)
+    ax3.legend(fontsize=14, loc="upper right", framealpha=0.9)
+    ax3.grid(True, alpha=0.3, axis="y", linestyle="--", linewidth=1)
+    
+    # Add simple explanation BELOW the plot
+    fig = plt.gcf()
+    textstr = f"WHAT PREDICTS OVERTIME? "
+    textstr += f"• Games close with 5 minutes left (margin ≤5 pts) are {close_ot_rate/not_close_ot_rate:.1f}x more likely to go to OT ({close_ot_rate:.1f}% vs {not_close_ot_rate:.1f}%). "
+    textstr += f"• OT games have smaller max leads during regulation (avg {avg_ot_lead:.0f} pts vs {avg_reg_lead:.0f} pts) - they stay competitive. "
+    textstr += f"• Games that are close with 5 minutes left are more likely to end regulation tied and go to OT. "
+    textstr += f"Note: 'Close game' means score margin ≤5 points with 5 MINUTES LEFT in regulation, not at the end."
+    fig.text(0.5, 0.02, textstr, fontsize=13, ha='center',
+             bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9, edgecolor='black', linewidth=2),
+             family='sans-serif')
     
     plt.tight_layout()
     output_path = output_dir / "overtime_predictors.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    print(f"✓ Saved: {output_path}")
+    logger.info(f"Saved: {output_path}")
     plt.close()
 
 
@@ -540,28 +751,21 @@ def main():
             "Please run pipeline/load_duckdb.py and analysis/compute_metrics.py first."
         )
     
-    print("Loading data from DuckDB...")
+    logger.info("Loading data from DuckDB...")
     scoring_runs, droughts, foul_freq, pace_metrics, momentum, comeback_prob, clutch_perf, timeout_effect, overtime_pred = load_data(db_file)
     
-    print(f"\nGenerating visualizations...")
-    print("="*60)
+    logger.info("Generating visualizations...")
+    logger.info("=" * 60)
     
-    # Generate all plots
-    plot_scoring_run_distribution(scoring_runs, output_dir)
-    plot_drought_length_by_team(droughts, output_dir)
-    plot_foul_frequency_heatmap(foul_freq, output_dir)
-    plot_pace_by_quarter(pace_metrics, output_dir)
-    plot_momentum_analysis(momentum, output_dir)
-    
-    # New advanced visualizations
+    # Generate key visualizations
     plot_comeback_probability(comeback_prob, output_dir)
     plot_clutch_performance(clutch_perf, output_dir)
     plot_timeout_effectiveness(timeout_effect, output_dir)
     plot_overtime_predictors(overtime_pred, output_dir)
     
-    print("\n" + "="*60)
-    print("✓ All visualizations generated!")
-    print(f"  Output directory: {output_dir}")
+    logger.info("=" * 60)
+    logger.info("All visualizations generated!")
+    logger.info(f"  Output directory: {output_dir}")
 
 
 if __name__ == "__main__":
