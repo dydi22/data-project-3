@@ -6,7 +6,7 @@
 data/raw/*.json
 data/raw/*.jsonl
 data/raw/playbyplay/*.json
-data/processed/*.duckdb
+# data/processed/*.duckdb  # Commented out to allow pushing DuckDB file
 data/processed/*.parquet
 data/processed/*.csv
 
