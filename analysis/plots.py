@@ -409,8 +409,8 @@ def plot_momentum_analysis(momentum: pd.DataFrame, output_dir: Path):
 
 
 def plot_comeback_probability(comeback_prob: pd.DataFrame, output_dir: Path):
-    """Plot comeback probability heatmap by deficit and time remaining."""
-    logger.info("Creating comeback probability heatmap...")
+    """Plot comeback probability heatmap by deficit and time remaining - HOME TEAM PERSPECTIVE."""
+    logger.info("Creating comeback probability heatmap (home team perspective)...")
     
     if comeback_prob.empty:
         logger.warning("No comeback probability data available")
@@ -453,18 +453,18 @@ def plot_comeback_probability(comeback_prob: pd.DataFrame, output_dir: Path):
         ax=ax,
         linewidths=1,
         linecolor='white',
-        cbar_kws={'label': 'Win Probability (%)', 'shrink': 0.8},
+        cbar_kws={'label': 'Home Team Win Probability (%)', 'shrink': 0.8},
         annot_kws={'size': 14, 'weight': 'bold'}
     )
     
     # Update colorbar
     cbar = ax.collections[0].colorbar
-    cbar.set_label("Win Probability (%)", fontsize=16, fontweight='bold')
+    cbar.set_label("Home Team Win Probability (%)", fontsize=16, fontweight='bold')
     cbar.ax.tick_params(labelsize=14)
     
     ax.set_xlabel("Minutes Remaining in Game", fontsize=18, fontweight='bold', labelpad=15)
-    ax.set_ylabel("Points Trailing", fontsize=18, fontweight='bold', labelpad=15)
-    ax.set_title("Comeback Win Probability\nWhat % chance does a team have to win when trailing?", 
+    ax.set_ylabel("Points Home Team is Trailing By", fontsize=18, fontweight='bold', labelpad=15)
+    ax.set_title("Home Team Comeback Win Probability\nWhat % chance does the HOME team have to win when trailing?", 
                  fontsize=20, fontweight="bold", pad=20)
     
     # Make tick labels larger
@@ -474,81 +474,20 @@ def plot_comeback_probability(comeback_prob: pd.DataFrame, output_dir: Path):
     example = comeback_prob[(comeback_prob["deficit"] == 10) & (comeback_prob["minutes_remaining"] == 5)]
     if len(example) > 0:
         example_prob = example.iloc[0]["win_probability"]
-        example_text = f"Example: Down 10 points with 5 min left = {example_prob:.0%} chance to win"
+        example_text = f"Example: Home team down 10 points with 5 min left = {example_prob:.0%} chance to win"
     else:
-        example_text = "Example: Down 10 points with 5 min left = ~20% chance to win"
+        example_text = "Example: Home team down 10 points with 5 min left = ~20% chance to win"
     
     fig = plt.gcf()
     fig.text(0.5, 0.02, 
-             f"READ: Find your deficit (left) and time remaining (bottom). Color shows win probability. "
-             f"{example_text}. Green = good chance, Red = low chance",
+             f"READ: Find how many points the HOME team is trailing by (left) and minutes remaining (bottom). "
+             f"Color shows HOME team's win probability. {example_text}. Green = good chance, Red = low chance",
              fontsize=14, ha='center',
              bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.9, edgecolor='black', linewidth=2),
              family='sans-serif')
     
     plt.tight_layout()
     output_path = output_dir / "comeback_probability.png"
-    plt.savefig(output_path, dpi=300, bbox_inches="tight")
-    logger.info(f"Saved: {output_path}")
-    plt.close()
-
-
-def plot_clutch_performance(clutch_perf: pd.DataFrame, output_dir: Path):
-    """Plot clutch performance analysis."""
-    logger.info("Creating clutch performance plot...")
-    
-    if clutch_perf.empty:
-        logger.warning("No clutch performance data available")
-        return
-    
-    # Calculate clutch efficiency (scoring rate in clutch situations)
-    clutch_perf["total_clutch_points"] = clutch_perf["home_scored"] + clutch_perf["visitor_scored"]
-    
-    fig = plt.figure(figsize=(12, 8))
-    ax = fig.add_subplot(111)
-    
-    # Simple histogram with clear colors
-    n, bins, patches = ax.hist(
-        clutch_perf["total_clutch_points"],
-        bins=range(0, int(clutch_perf["total_clutch_points"].max()) + 2),
-        edgecolor="black",
-        alpha=0.7,
-        color="crimson",
-        linewidth=1.5
-    )
-    
-    # Calculate key stats
-    mean_score = clutch_perf["total_clutch_points"].mean()
-    median_score = clutch_perf["total_clutch_points"].median()
-    max_score = clutch_perf["total_clutch_points"].max()
-    
-    # Add clear reference lines
-    ax.axvline(mean_score, color="blue", linestyle="--", linewidth=3, 
-               label=f"Average: {mean_score:.1f} points", zorder=3)
-    ax.axvline(median_score, color="green", linestyle="--", linewidth=3, 
-               label=f"Median: {median_score:.1f} points", zorder=3)
-    
-    ax.set_xlabel("Total Points Scored (Last 5 Minutes, Game Within 5 Points)", 
-                  fontsize=16, fontweight="bold", labelpad=15)
-    ax.set_ylabel("Number of Games", fontsize=16, fontweight="bold", labelpad=15)
-    ax.set_title("Clutch Performance: How Intense Are Close Game Finishes?", 
-                 fontsize=20, fontweight="bold", pad=20)
-    ax.grid(True, alpha=0.3, axis="y", linestyle="--", linewidth=1)
-    ax.tick_params(axis='both', which='major', labelsize=14)
-    
-    ax.legend(fontsize=14, loc="upper right", framealpha=0.9)
-    
-    # Add simple explanation BELOW the plot
-    fig = plt.gcf()
-    fig.text(0.5, 0.02, 
-             f"WHAT THIS SHOWS: Points scored by both teams in the final 5 minutes when the game is within 5 points. "
-             f"Higher = more exciting finish. Average: {mean_score:.1f} points, Range: 0-{max_score} points",
-             fontsize=14, ha='center', 
-             bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9, edgecolor='black', linewidth=2),
-             family='sans-serif')
-    
-    plt.tight_layout()
-    output_path = output_dir / "clutch_performance.png"
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     logger.info(f"Saved: {output_path}")
     plt.close()
@@ -656,23 +595,27 @@ def plot_overtime_predictors(overtime_pred: pd.DataFrame, output_dir: Path):
     avg_reg_margin = reg_games[margin_col].mean()
     avg_ot_margin = ot_games[margin_col].mean()
     
-    fig = plt.figure(figsize=(14, 10))
-    gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+    fig = plt.figure(figsize=(14, 11))
+    gs = fig.add_gridspec(3, 2, height_ratios=[2, 2, 1], hspace=0.4, wspace=0.3)
     ax1 = fig.add_subplot(gs[0, 0])
     ax2 = fig.add_subplot(gs[0, 1])
     ax3 = fig.add_subplot(gs[1, :])
+    ax_desc = fig.add_subplot(gs[2, :])
+    ax_desc.axis('off')
     
     # Plot 1: Close game indicator (bar chart with percentages) - MAIN INSIGHT
-    categories = ["Close with 5 Min Left\n(Margin ≤5 pts)", "Not Close with 5 Min Left\n(Margin >5 pts)"]
+    categories = ["Close Games\n(Margin ≤5 pts)", "Not Close\n(Margin >5 pts)"]
     percentages = [close_ot_rate, not_close_ot_rate]
     colors = ["crimson", "steelblue"]
     
     bars = ax1.bar(categories, percentages, color=colors, alpha=0.8, edgecolor="black", linewidth=2.5)
+    # Remove x-axis label since categories are self-explanatory
     ax1.set_ylabel("Chance of Going to Overtime (%)", fontsize=16, fontweight="bold", labelpad=15)
-    ax1.set_title("Key Finding: Close Games Go to OT More Often", 
+    ax1.set_title("Key Finding: Close Games Go to OT More Often\n(Measured with 5 minutes left in regulation)", 
                   fontsize=18, fontweight="bold", pad=15)
     ax1.set_ylim(0, max(percentages) * 1.3)
-    ax1.tick_params(axis='both', which='major', labelsize=14)
+    ax1.tick_params(axis='x', which='major', labelsize=13, pad=10)
+    ax1.tick_params(axis='y', which='major', labelsize=14)
     ax1.grid(True, alpha=0.3, axis="y", linestyle="--", linewidth=1)
     
     # Add value labels on bars
@@ -686,19 +629,24 @@ def plot_overtime_predictors(overtime_pred: pd.DataFrame, output_dir: Path):
     bp = ax2.boxplot(
         [reg_games["max_lead"].dropna(), ot_games["max_lead"].dropna()],
         patch_artist=True,
-        widths=0.6,
-        labels=[f"Regulation\n({len(reg_games)} games)", f"Overtime\n({len(ot_games)} games)"]
+        widths=0.6
     )
+    
+    # Set labels separately for better control
+    ax2.set_xticklabels([f"Regulation\n({len(reg_games)} games)", f"Overtime\n({len(ot_games)} games)"], 
+                        fontsize=12)
     
     # Color the boxes
     for patch, color in zip(bp['boxes'], ['steelblue', 'crimson']):
         patch.set_facecolor(color)
         patch.set_alpha(0.7)
     
+    ax2.set_xlabel("Game Type", fontsize=14, fontweight="bold", labelpad=10)
     ax2.set_ylabel("Maximum Lead in Game (Points)", fontsize=16, fontweight="bold", labelpad=15)
     ax2.set_title("OT Games Stay Competitive Throughout", 
                   fontsize=18, fontweight="bold", pad=15)
-    ax2.tick_params(axis='both', which='major', labelsize=14)
+    ax2.tick_params(axis='x', which='major', labelsize=12)
+    ax2.tick_params(axis='y', which='major', labelsize=14)
     ax2.grid(True, alpha=0.3, axis="y", linestyle="--", linewidth=1)
     
     # Plot 3: Margin with 5 minutes left distribution (overlapping histograms)
@@ -710,24 +658,24 @@ def plot_overtime_predictors(overtime_pred: pd.DataFrame, output_dir: Path):
     ax3.hist(ot_games[margin_col], bins=50, alpha=0.8, label=f"Overtime Games ({len(ot_games)})", 
              color="crimson", edgecolor="black", linewidth=1)
     ax3.axvline(5, color="orange", linestyle="--", linewidth=3, alpha=0.7, label="Close Game (5 pts)")
-    ax3.set_xlabel("Score Margin with 5 Minutes Left in Regulation (Points)", fontsize=16, fontweight="bold", labelpad=15)
+    ax3.set_xlabel("Score Margin with 5 Minutes Left (Points)", fontsize=16, fontweight="bold", labelpad=15)
     ax3.set_ylabel("Number of Games", fontsize=16, fontweight="bold", labelpad=15)
     ax3.set_title("Margin with 5 Minutes Left: Close Games More Likely to Go to OT", 
-                  fontsize=18, fontweight="bold", pad=15)
-    ax3.tick_params(axis='both', which='major', labelsize=14)
-    ax3.legend(fontsize=14, loc="upper right", framealpha=0.9)
+                  fontsize=16, fontweight="bold", pad=12)
+    ax3.tick_params(axis='x', which='major', labelsize=14)
+    ax3.tick_params(axis='y', which='major', labelsize=14)
+    ax3.legend(fontsize=13, loc="upper right", framealpha=0.9)
     ax3.grid(True, alpha=0.3, axis="y", linestyle="--", linewidth=1)
     
-    # Add simple explanation BELOW the plot
-    fig = plt.gcf()
+    # Add simple explanation in dedicated subplot (no overlap)
     textstr = f"WHAT PREDICTS OVERTIME? "
     textstr += f"• Games close with 5 minutes left (margin ≤5 pts) are {close_ot_rate/not_close_ot_rate:.1f}x more likely to go to OT ({close_ot_rate:.1f}% vs {not_close_ot_rate:.1f}%). "
     textstr += f"• OT games have smaller max leads during regulation (avg {avg_ot_lead:.0f} pts vs {avg_reg_lead:.0f} pts) - they stay competitive. "
     textstr += f"• Games that are close with 5 minutes left are more likely to end regulation tied and go to OT. "
     textstr += f"Note: 'Close game' means score margin ≤5 points with 5 MINUTES LEFT in regulation, not at the end."
-    fig.text(0.5, 0.02, textstr, fontsize=13, ha='center',
-             bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9, edgecolor='black', linewidth=2),
-             family='sans-serif')
+    ax_desc.text(0.5, 0.5, textstr, transform=ax_desc.transAxes, fontsize=12, ha='center', va='center',
+                 bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.9, edgecolor='black', linewidth=2),
+                 family='sans-serif', wrap=True)
     
     plt.tight_layout()
     output_path = output_dir / "overtime_predictors.png"
@@ -759,7 +707,6 @@ def main():
     
     # Generate key visualizations
     plot_comeback_probability(comeback_prob, output_dir)
-    plot_clutch_performance(clutch_perf, output_dir)
     plot_timeout_effectiveness(timeout_effect, output_dir)
     plot_overtime_predictors(overtime_pred, output_dir)
     

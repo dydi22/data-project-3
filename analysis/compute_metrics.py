@@ -421,32 +421,16 @@ def compute_comeback_probability(conn: duckdb.DuckDBPyConnection) -> pd.DataFram
             if len(closest) > 0:
                 margin = closest.iloc[0]["score_margin"]
                 
-                # For each time point, record:
-                # - If home team was trailing, did they win?
-                # - If visitor team was trailing, did they win?
-                
-                # Home team perspective
+                # Only track HOME team's win probability when they're trailing
+                # margin = home_score - visitor_score, so negative means home is losing
                 if margin < 0:  # Home is losing
                     deficit = abs(margin)
-                    trailing_team_won = 1 if home_won else 0
+                    home_won_despite_trailing = 1 if home_won else 0
                     comeback_data.append({
                         "game_id": game_id,
                         "minutes_remaining": minutes_remaining,
                         "deficit": deficit,
-                        "trailing_team": "home",
-                        "trailing_team_won": trailing_team_won
-                    })
-                
-                # Visitor team perspective
-                if margin > 0:  # Visitor is losing
-                    deficit = margin
-                    trailing_team_won = 1 if not home_won else 0
-                    comeback_data.append({
-                        "game_id": game_id,
-                        "minutes_remaining": minutes_remaining,
-                        "deficit": deficit,
-                        "trailing_team": "visitor",
-                        "trailing_team_won": trailing_team_won
+                        "home_won": home_won_despite_trailing  # Did home team win despite trailing?
                     })
     
     comeback_df = pd.DataFrame(comeback_data)
@@ -456,13 +440,12 @@ def compute_comeback_probability(conn: duckdb.DuckDBPyConnection) -> pd.DataFram
         # Round deficits to 2-point buckets to increase sample sizes (e.g., 8-9 points -> 8 points)
         comeback_df["deficit_bucket"] = (comeback_df["deficit"] // 2) * 2
         
-        prob_df = comeback_df.groupby(["minutes_remaining", "deficit_bucket"])["trailing_team_won"].agg([
+        prob_df = comeback_df.groupby(["minutes_remaining", "deficit_bucket"])["home_won"].agg([
             "mean", "count"
         ]).reset_index()
         prob_df.columns = ["minutes_remaining", "deficit", "win_probability", "sample_size"]
-        # Only include combinations with at least 5 samples for reliability (reduced from 10)
+        # Only include combinations with at least 5 samples for reliability
         prob_df = prob_df[prob_df["sample_size"] >= 5]
-        prob_df = prob_df[prob_df["sample_size"] >= 10]
     else:
         prob_df = pd.DataFrame()
     
