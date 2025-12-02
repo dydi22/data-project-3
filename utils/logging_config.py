@@ -63,7 +63,7 @@ def setup_logging(
         logger.info(f"Logging to file: {log_filename}")
     
     return logger
-
+ 
 
 def get_logger(name: str = "nba_pipeline") -> logging.Logger:
     """
@@ -83,4 +83,4 @@ def get_logger(name: str = "nba_pipeline") -> logging.Logger:
         logger = logging.getLogger(name)
     
     return logger
-
+ 

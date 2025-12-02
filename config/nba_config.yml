@@ -25,4 +25,4 @@ processing:
   max_retries: 3
   retry_delay: 2  # seconds
   batch_size: 100  # games per batch
-
+ 

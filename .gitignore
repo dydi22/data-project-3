@@ -57,6 +57,7 @@ Thumbs.db
 logs/
 *.log
 
+
 # Generated visualizations (keep code, not outputs)
 analysis/plots/*.png
 
