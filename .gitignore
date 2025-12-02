@@ -6,7 +6,7 @@
 data/raw/*.json
 data/raw/*.jsonl
 data/raw/playbyplay/*.json
-# data/processed/*.duckdb  # Commented out to allow pushing DuckDB file
+data/processed/*.duckdb
 data/processed/*.parquet
 data/processed/*.csv
 
@@ -56,4 +56,7 @@ Thumbs.db
 # Logs
 logs/
 *.log
+
+# Generated visualizations (keep code, not outputs)
+analysis/plots/*.png
 
